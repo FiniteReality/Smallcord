@@ -90,32 +90,78 @@ namespace Smallscord.WebSockets
 		{
 			try
 			{
-				object data = JsonConvert.DeserializeObject(message);
-				var opcode = (data as GatewayEntity).Opcode;
+				var data = JsonConvert.DeserializeObject<GatewayEntity>(message);
+				var opcode = data.Opcode;
 
 				switch(opcode)
 				{
 					case GatewayOpcode.Identify:
 						websocketLogger.LogInformation("Handling Identify");
-						GatewayIdentify loginInfo = data as GatewayIdentify;
+						GatewayIdentify loginInfo = JsonConvert.DeserializeObject<GatewayIdentify>(message);
 
 						if (string.IsNullOrWhiteSpace(loginInfo.ClientToken))
 						{
 							websocketLogger.LogWarning("Invalid client token was provided");
 							await SendClose(4004);
+							return;
+						}
+						else
+						{
+							websocketLogger.LogDebug("Client using token {0}", loginInfo.ClientToken);
 						}
 
-						if (!service.TryOverwrite(loginInfo.ClientToken, this))
+						var reconnectStatus = service.TryOverwrite(loginInfo.ClientToken, this);
+						if (reconnectStatus == ReconnectStatus.AlreadyConnected)
 						{
 							websocketLogger.LogWarning("A client already exists using the token {0}", loginInfo.ClientToken);
 							await SendClose(4005);
+							return;
+						}
+						else if (reconnectStatus == ReconnectStatus.Reconnect)
+						{
+							websocketLogger.LogInformation("Handling Identify as reconnect: you should use Resume instead or mark a new connection");
 						}
 
-						if (loginInfo.ShardInfo.Length > 0 && loginInfo.ShardInfo.Length != 2)
+						if (loginInfo.ShardInfo != default(int[]))
 						{
-							websocketLogger.LogWarning("Invalid shard info (expected 2 values, got {0})", loginInfo.ShardInfo.Length);
-							await SendClose(4010);
+							// sharding: check two values were provided
+							if (loginInfo.ShardInfo.Length != 2)
+							{
+								websocketLogger.LogWarning("Invalid shard info (expected 2 values, got {0})", loginInfo.ShardInfo.Length);
+								await SendClose(4010);
+								return;
+							}
+							else
+							{
+								var shardId = loginInfo.ShardInfo[0];
+								var shardCount = loginInfo.ShardInfo[1];
+
+								if (shardId < 0)
+								{
+									websocketLogger.LogWarning("Invalid shard info (shardId must be greater than or equal to 0)");
+									await SendClose(4010);
+									return;
+								}
+								if (shardCount < 1)
+								{
+									websocketLogger.LogWarning("Invalid shard info (shardCount must be greater than 0)");
+									await SendClose(4010);
+									return;
+								}
+
+								if (shardId >= shardCount)
+								{
+									websocketLogger.LogWarning("Invalid shard info (shardId {0} must be less than shardCount {1})", shardId, shardCount);
+									await SendClose(4010);
+									return;
+								}
+								else
+								{
+									websocketLogger.LogDebug("Sharding information provided: id={0} count={1}", shardId, shardCount);
+								}
+							}
 						}
+						// if we go this far, the Identify packet was valid.
 						break;
 					case GatewayOpcode.Resume:
 						websocketLogger.LogInformation("Handling Resume");

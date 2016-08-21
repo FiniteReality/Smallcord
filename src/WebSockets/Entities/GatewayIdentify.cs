@@ -19,7 +19,7 @@ namespace Smallscord.WebSockets.Entities
 		[JsonProperty("large_threshold")]
 		public int MaxUsers { get; set; }
 		[JsonPropertyAttribute("shard")]
-		public int?[] ShardInfo { get; set; }
+		public int[] ShardInfo { get; set; }
 	}
 
 	public class ClientProperties

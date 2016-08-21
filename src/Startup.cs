@@ -41,7 +41,7 @@ namespace Smallscord
 			loggerFactory.AddConsole(Configuration.GetSection("Logging"));
 			loggerFactory.AddDebug();
 
-			var webSocketLogger = loggerFactory.CreateLogger("WebSocket");
+			var webSocketLogger = loggerFactory.CreateLogger("WebSocketServer");
 
 			if (env.IsDevelopment())
 			{
