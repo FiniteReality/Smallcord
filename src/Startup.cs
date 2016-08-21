@@ -8,7 +8,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Smallscord.WebSocketControllers;
+using Microsoft.Extensions.Primitives;
+using Smallscord.WebSockets;
 
 namespace Smallscord
 {
@@ -31,11 +32,11 @@ namespace Smallscord
 		public void ConfigureServices(IServiceCollection services)
 		{
 			services.AddMvc();
-			services.AddSingleton<WebSocketController>(x => WebSocketController.GetInstance());
+			services.AddSingleton<WebSocketControllerService>();
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-		public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
+		public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory, WebSocketService controllerService)
 		{
 			loggerFactory.AddConsole(Configuration.GetSection("Logging"));
 			loggerFactory.AddDebug();
@@ -48,14 +49,7 @@ namespace Smallscord
 			}
 			else
 			{
-				ExceptionHandlerOptions exceptionOptions = new ExceptionHandlerOptions();
-				exceptionOptions.ExceptionHandler = async context =>
-				{
-					context.Response.StatusCode = 500;
-					context.Response.ContentType = "application/json";
-					await context.Response.WriteAsync("{}"); // TODO: handle this
-				};
-				app.UseExceptionHandler(exceptionOptions);
+				app.UseStatusCodePages();
 			}
 
 			// Add external authentication middleware below. To configure them please see https://go.microsoft.com/fwlink/?LinkID=532715
@@ -65,16 +59,22 @@ namespace Smallscord
 
 			app.Use(async (context, next) => 
 			{
-				webSocketLogger.LogDebug("Client connecting");
 				if (context.WebSockets.IsWebSocketRequest)
 				{
-					webSocketLogger.LogDebug("Was websocket");
+					StringValues _token;
+					if (!context.Request.Headers.TryGetValue("Authorization", out _token))
+						throw new UnauthorizedAccessException(@"{""code"":50014, ""message"":""Invalid authentication token""}");
+
+					string token = _token.ToString();
+
+					webSocketLogger.LogDebug("Client connecting with token {0}", token);
+
 					var websocket = await context.WebSockets.AcceptWebSocketAsync();
-					await new WebSocketController(websocket, loggerFactory).Run();
+					var controller = controllerService.GetOrCreate(token, x => new WebSocketController(websocket, loggerFactory));
+					await controller.Run();
 				}
 				else
 				{
-					webSocketLogger.LogDebug("Not websocket");
 					await next();
 				}
 			});

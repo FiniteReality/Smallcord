@@ -4,30 +4,29 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
-namespace Smallscord.WebSocketControllers
+using Newtonsoft.Json;
+using Smallscord.WebSockets.Entities;
+
+namespace Smallscord.WebSockets
 {
-	// OKAY. I KNOW SINGLETONS ARE BAD BUT ONLY ONE CLIENT WILL EXIST AT ANY TIME SINCE THIS IS LOCAL.
-	class WebSocketController
+	public class WebSocketController
 	{
-		private static WebSocketController instance;
+		private const int HEARTBEAT_INTERVAL = 1000;
 
 		private WebSocket _socket;
 		private ILogger<WebSocketController> websocketLogger;
 
 		public WebSocketController(WebSocket socket, ILoggerFactory factory)
 		{
-			if (instance != null)
-				throw new InvalidOperationException("An instance already exists");
-				
 			_socket = socket;
 			websocketLogger = factory.CreateLogger<WebSocketController>();
-			instance = this;
 		}
 
 		public async Task Run()
 		{
+			await SendHello();
+
 			var buffer = new byte[1024 * 8]; // 8kb
 			var read = 0;
 			while (_socket.State == WebSocketState.Open)
@@ -49,18 +48,32 @@ namespace Smallscord.WebSocketControllers
 			}
 		}
 
+		public Task SendRaw(string data) => SendRaw(data, CancellationToken.None);		
+		public async Task SendRaw(string data, CancellationToken token)
+		{
+			byte[] _data = Encoding.UTF8.GetBytes(data);
+			await _socket.SendAsync(new ArraySegment<byte>(_data), WebSocketMessageType.Text, true, token);
+		}
+		public Task SendEntity(GatewayEntity entity) => SendRaw(entity.ToString());
+		public Task SendEntity(GatewayEntity entity, CancellationToken token) => SendRaw(entity.ToString(), token);
+
 		private async Task Handle(string message)
 		{
-			// TODO: handle the message
 			websocketLogger.LogInformation(
 				"Received payload: `{0}`",
 				message
 			);
-		} 
 
-		public static WebSocketController GetInstance()
+			var opcode = JsonConvert.DeserializeObject<GatewayEntity>(message).Opcode;
+		}
+
+		public async Task SendHello()
 		{
-			return instance;
+			await SendEntity(new GatewayHello()
+			{
+				HeartbeatInterval = HEARTBEAT_INTERVAL,
+				ConnectedServers = new string[]{"smallscord-gateway-dbg-1-0"}
+			});
 		}
 	}
 }

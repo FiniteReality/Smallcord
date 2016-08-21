@@ -1,0 +1,17 @@
+using Newtonsoft.Json;
+
+namespace Smallscord.WebSockets.Entities
+{
+	public class GatewayHello : GatewayEntity
+	{
+		public GatewayHello()
+		{
+			Opcode = GatewayOpcode.Hello;
+		}
+
+		[JsonProperty("heartbeat_interval")]
+		public int HeartbeatInterval { get; set; }
+		[JsonProperty("_trace")]
+		public string[] ConnectedServers { get; set; }
+	}
+}
