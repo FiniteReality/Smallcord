@@ -17,6 +17,20 @@ namespace Smallscord.WebSockets
 			return sessions.GetOrAdd(key, create);
 		}
 
+		public bool TryOverwrite(string key, WebSocketController controller)
+		{
+			WebSocketController existing;
+			if (!TryGet(key, out existing))
+				GetOrCreate(key, x => controller);
+			else if (existing.Closed)
+			{
+				if (TryRemove(key, out existing))
+					GetOrCreate(key, x => controller);
+			}
+
+			return false;
+		}
+
 		public bool TryGet(string key, out WebSocketController value)
 		{
 			return sessions.TryGetValue(key, out value);

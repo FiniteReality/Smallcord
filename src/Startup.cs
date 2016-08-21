@@ -61,16 +61,10 @@ namespace Smallscord
 			{
 				if (context.WebSockets.IsWebSocketRequest)
 				{
-					StringValues _token;
-					if (!context.Request.Headers.TryGetValue("Authorization", out _token))
-						throw new UnauthorizedAccessException(@"{""code"":50014, ""message"":""Invalid authentication token""}");
-
-					string token = _token.ToString();
-
-					webSocketLogger.LogDebug("Client connecting with token {0}", token);
+					webSocketLogger.LogDebug("Client connecting");
 
 					var websocket = await context.WebSockets.AcceptWebSocketAsync();
-					var controller = controllerService.GetOrCreate(token, x => new WebSocketController(websocket, loggerFactory));
+					var controller = new WebSocketController(controllerService, websocket, loggerFactory);
 					await controller.Run();
 				}
 				else
