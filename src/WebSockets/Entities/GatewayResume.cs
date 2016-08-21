@@ -5,8 +5,8 @@ namespace Smallscord.WebSockets.Entities
 	public class GatewayResume : GatewayEntity
 	{
 		public GatewayResume()
+			: base (GatewayOpcode.Resume)
 		{
-			Opcode = GatewayOpcode.Resume;
 		}
 
 		[JsonProperty("token")]
@@ -15,7 +15,7 @@ namespace Smallscord.WebSockets.Entities
 		[JsonProperty("session_id")]
 		public string SessionId { get; set; }
 
-		[JsonPropertyAttribute("seq")]
+		[JsonProperty("seq")]
 		public int SequenceNumber { get; set; }
 	}
 }

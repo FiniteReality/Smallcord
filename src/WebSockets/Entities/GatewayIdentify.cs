@@ -5,8 +5,8 @@ namespace Smallscord.WebSockets.Entities
 	public class GatewayIdentify : GatewayEntity
 	{
 		public GatewayIdentify()
+			 : base (GatewayOpcode.Identify)
 		{
-			Opcode = GatewayOpcode.Identify;
 		}
 
 		[JsonProperty("token")]

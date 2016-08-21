@@ -5,8 +5,8 @@ namespace Smallscord.WebSockets.Entities
 	public class GatewayHello : GatewayEntity
 	{
 		public GatewayHello()
+			: base (GatewayOpcode.Hello)
 		{
-			Opcode = GatewayOpcode.Hello;
 		}
 
 		[JsonProperty("heartbeat_interval")]

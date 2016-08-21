@@ -21,32 +21,54 @@ namespace Smallscord.WebSockets
 		public WebSocketController(WebSocketService controllerService, WebSocket _socket, ILoggerFactory factory)
 		{
 			socket = _socket;
-			service = controllerService; 
+			service = controllerService;
+			SessionId = Environment.TickCount.ToString();
 			websocketLogger = factory.CreateLogger<WebSocketController>();
 		}
 
 		public bool Connected => socket.State == WebSocketState.Open;
 		public bool Closed => socket.State == WebSocketState.Closed || 
 			socket.State == WebSocketState.CloseReceived ||
-			socket.State == WebSocketState.CloseSent;  
+			socket.State == WebSocketState.CloseSent;
+
+		public int Sequence { get; internal set; }
+
+		public string SessionId { get; }
 
 		public async Task Run()
 		{
 			await SendHello();
 
-			var buffer = new byte[1024 * 4]; // 4kb
+			var buffer = new byte[4096];
 			var read = 0;
+			int lastCheck = 0;
+			int eventsSent = 0;
 			while (socket.State == WebSocketState.Open)
 			{
-				var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer, read, 512), CancellationToken.None);
+				var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer, read, 4096), CancellationToken.None);
 
 				if (result.EndOfMessage)
 				{
 					read += result.Count;
 					websocketLogger.LogDebug("Received {0} bytes, message type {1}", read, result.MessageType);
 
+					// TODO: implement better ratelimiting
+					if (Environment.TickCount - lastCheck > 60000)
+					{
+						if (eventsSent > 120)
+						{
+							websocketLogger.LogWarning("Disconnecting client for surpassing rate limit");
+							await SendClose(4008);
+							break;
+						}
+
+						eventsSent = 0;	
+						lastCheck = Environment.TickCount;
+					}
+
 					if (result.MessageType == WebSocketMessageType.Text)
 					{
+						eventsSent++;
 						var message = Encoding.UTF8.GetString(buffer, 0, read);
 						await HandleClientMessageString(message);
 					}
@@ -61,9 +83,9 @@ namespace Smallscord.WebSockets
 				}
 				else
 				{
-					read += result.Count;
-
-					websocketLogger.LogDebug("Read {0} bytes of non-complete message", read);
+					websocketLogger.LogWarning("Maximum payload size exceeded.");
+					await SendClose(4002);
+					break;
 				}
 			}
 		}
@@ -95,7 +117,14 @@ namespace Smallscord.WebSockets
 
 				switch(opcode)
 				{
+					case GatewayOpcode.Heartbeat:
+					{
+						// TODO: validate heartbeat sequence
+						await SendEntity(new GatewayEntity(GatewayOpcode.HeartbeatAck));
+						break;
+					}
 					case GatewayOpcode.Identify:
+					{
 						websocketLogger.LogInformation("Handling Identify");
 						GatewayIdentify loginInfo = JsonConvert.DeserializeObject<GatewayIdentify>(message);
 
@@ -162,20 +191,85 @@ namespace Smallscord.WebSockets
 							}
 						}
 						// if we go this far, the Identify packet was valid.
+						await SendIdentifyResponse();
 						break;
+					}
 					case GatewayOpcode.Resume:
+					{
 						websocketLogger.LogInformation("Handling Resume");
+						GatewayResume resumeInfo = JsonConvert.DeserializeObject<GatewayResume>(message);
+
+						bool resumeSuccess = true;
+
+						if (string.IsNullOrWhiteSpace(resumeInfo.ClientToken))
+						{
+							websocketLogger.LogWarning("Invalid client token was provided");
+							resumeSuccess = false;
+						}
+						else
+						{
+							websocketLogger.LogDebug("Client using token {0}", resumeInfo.ClientToken);
+
+							WebSocketController oldClient;
+							service.TryGet(resumeInfo.ClientToken, out oldClient);
+							var reconnectStatus = service.TryOverwrite(resumeInfo.ClientToken, this);
+							if (reconnectStatus == ReconnectStatus.AlreadyConnected)
+							{
+								websocketLogger.LogWarning("A client already exists using the token {0}", resumeInfo.ClientToken);
+								resumeSuccess = false;
+							}
+							else if (reconnectStatus == ReconnectStatus.InitialConnect)
+							{
+								websocketLogger.LogWarning("Client tried to resume a non-existant session");
+								resumeSuccess = false;
+							}
+
+							if (resumeInfo.SessionId != oldClient.SessionId)
+							{
+								websocketLogger.LogWarning("Client tried to use an invalid session id");
+								resumeSuccess = false;
+							}
+
+							if (resumeInfo.SequenceNumber > oldClient.Sequence)
+							{
+								websocketLogger.LogWarning("Client tried to use an invalid sequence number");
+								resumeSuccess = false;
+							}
+						}
+
+						await SendResumeResponse(resumeSuccess);
+
 						break;
+					}
 					default:
+					{
 						websocketLogger.LogWarning("Unknown opcode {0}", opcode);
 						await SendClose(4001);
 						break;
+					}
 				}
 			}
 			catch (JsonException e)
 			{
 				websocketLogger.LogTrace("Exception occured while deserializing JSON: {0}", e);
 				await SendClose(4002);
+			}
+		}
+
+		private async Task SendIdentifyResponse()
+		{
+			// TODO: send ready event
+		}
+
+		private async Task SendResumeResponse(bool resumeSuccess)
+		{
+			if (!resumeSuccess)
+			{
+				await SendEntity(new GatewayEntity(GatewayOpcode.InvalidSession));
+			}
+			else
+			{
+				// TODO: replay events
 			}
 		}
 
