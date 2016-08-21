@@ -21,11 +21,15 @@ namespace Smallscord.WebSockets
 		{
 			WebSocketController existing;
 			if (!TryGet(key, out existing))
+			{
 				GetOrCreate(key, x => controller);
+			}
 			else if (existing.Closed)
 			{
 				if (TryRemove(key, out existing))
+				{
 					GetOrCreate(key, x => controller);
+				}
 			}
 
 			return false;
