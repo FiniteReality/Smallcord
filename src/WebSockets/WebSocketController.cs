@@ -1,12 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
+
 using Microsoft.Extensions.Logging;
 
 using Newtonsoft.Json;
+
 using Smallscord.WebSockets.Entities;
+using Smallscord.Events;
 
 namespace Smallscord.WebSockets
 {
@@ -18,12 +23,15 @@ namespace Smallscord.WebSockets
 		private WebSocketService service;
 		private ILogger<WebSocketController> websocketLogger;
 
+		private IList<GatewayDispatch> events;
+
 		public WebSocketController(WebSocketService controllerService, WebSocket _socket, ILoggerFactory factory)
 		{
 			socket = _socket;
 			service = controllerService;
 			SessionId = Environment.TickCount.ToString();
 			websocketLogger = factory.CreateLogger<WebSocketController>();
+			events = new List<GatewayDispatch>();
 		}
 
 		public bool Connected => socket.State == WebSocketState.Open;
@@ -32,7 +40,6 @@ namespace Smallscord.WebSockets
 			socket.State == WebSocketState.CloseSent;
 
 		public int Sequence { get; internal set; }
-
 		public string SessionId { get; }
 
 		public async Task Run()
@@ -106,6 +113,15 @@ namespace Smallscord.WebSockets
 		public Task SendClose(ushort reason, CancellationToken token)
 		{
 			return socket.CloseAsync((WebSocketCloseStatus)reason, "", token);
+		}
+
+		public Task SendDispatch(GatewayEvent eventInfo) => SendDispatch(eventInfo, WebSocketMessageType.Text, CancellationToken.None);
+		public Task SendDispatch(GatewayEvent eventInfo, WebSocketMessageType type) => SendDispatch(eventInfo, type, CancellationToken.None);
+		public Task SendDispatch(GatewayEvent eventInfo, WebSocketMessageType type, CancellationToken token)
+		{
+			var dispatch = new GatewayDispatch(++Sequence, eventInfo);
+			events.Add(dispatch);
+			return SendEntity(dispatch);
 		}
 
 		private async Task HandleClientMessageString(string message)
@@ -200,6 +216,7 @@ namespace Smallscord.WebSockets
 						GatewayResume resumeInfo = JsonConvert.DeserializeObject<GatewayResume>(message);
 
 						bool resumeSuccess = true;
+						WebSocketController oldClient = null;
 
 						if (string.IsNullOrWhiteSpace(resumeInfo.ClientToken))
 						{
@@ -210,7 +227,6 @@ namespace Smallscord.WebSockets
 						{
 							websocketLogger.LogDebug("Client using token {0}", resumeInfo.ClientToken);
 
-							WebSocketController oldClient;
 							service.TryGet(resumeInfo.ClientToken, out oldClient);
 							var reconnectStatus = service.TryOverwrite(resumeInfo.ClientToken, this);
 							if (reconnectStatus == ReconnectStatus.AlreadyConnected)
@@ -237,7 +253,7 @@ namespace Smallscord.WebSockets
 							}
 						}
 
-						await SendResumeResponse(resumeSuccess);
+						await SendResumeResponse(resumeInfo, oldClient, resumeSuccess);
 
 						break;
 					}
@@ -258,10 +274,11 @@ namespace Smallscord.WebSockets
 
 		private async Task SendIdentifyResponse()
 		{
-			// TODO: send ready event
+			// TODO:
+			//await SendDispatch(new EventReady(SessionId))
 		}
 
-		private async Task SendResumeResponse(bool resumeSuccess)
+		private async Task SendResumeResponse(GatewayResume resumeInfo, WebSocketController previousSession, bool resumeSuccess)
 		{
 			if (!resumeSuccess)
 			{
@@ -270,6 +287,12 @@ namespace Smallscord.WebSockets
 			else
 			{
 				// TODO: replay events
+				int sequenceNumber = resumeInfo.SequenceNumber;
+				IEnumerable<GatewayDispatch> dispatches = previousSession.events.Where(x => x.Sequence > sequenceNumber && x.Sequence < Sequence);
+				foreach (GatewayDispatch dispatch in dispatches)
+				{
+					await SendEntity(dispatch);
+				}
 			}
 		}
 
