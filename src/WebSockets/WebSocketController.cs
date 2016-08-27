@@ -109,8 +109,9 @@ namespace Smallscord.WebSockets
 		public Task SendEntity(GatewayEntity entity, CancellationToken token) => SendEntity(entity, WebSocketMessageType.Text, token);
 		public Task SendEntity(GatewayEntity entity, WebSocketMessageType type, CancellationToken token) => SendString(entity.ToString(), type, token);
 
-		public Task SendClose(ushort reason) => SendClose(reason, CancellationToken.None);
-		public Task SendClose(ushort reason, CancellationToken token)
+		public Task SendClose(ushort reason) => SendClose(reason, "", CancellationToken.None);
+		public Task SendClose(ushort reason, string message) => SendClose(reason, message, CancellationToken.None);
+		public Task SendClose(ushort reason, string message, CancellationToken token)
 		{
 			return socket.CloseAsync((WebSocketCloseStatus)reason, "", token);
 		}
@@ -147,7 +148,7 @@ namespace Smallscord.WebSockets
 						if (string.IsNullOrWhiteSpace(loginInfo.ClientToken))
 						{
 							websocketLogger.LogWarning("Invalid client token was provided");
-							await SendClose(4004);
+							await SendClose(4004, "Invalid client token");
 							return;
 						}
 						else
@@ -159,7 +160,7 @@ namespace Smallscord.WebSockets
 						if (reconnectStatus == ReconnectStatus.AlreadyConnected)
 						{
 							websocketLogger.LogWarning("A client already exists using the token {0}", loginInfo.ClientToken);
-							await SendClose(4005);
+							await SendClose(4005, "Already connected using given token");
 							return;
 						}
 						else if (reconnectStatus == ReconnectStatus.Reconnect)
@@ -173,7 +174,7 @@ namespace Smallscord.WebSockets
 							if (loginInfo.ShardInfo.Length != 2)
 							{
 								websocketLogger.LogWarning("Invalid shard info (expected 2 values, got {0})", loginInfo.ShardInfo.Length);
-								await SendClose(4010);
+								await SendClose(4010, "Invalid shard info");
 								return;
 							}
 							else
@@ -184,20 +185,20 @@ namespace Smallscord.WebSockets
 								if (shardId < 0)
 								{
 									websocketLogger.LogWarning("Invalid shard info (shardId must be greater than or equal to 0)");
-									await SendClose(4010);
+									await SendClose(4010, "Invalid shard info");
 									return;
 								}
 								if (shardCount < 1)
 								{
 									websocketLogger.LogWarning("Invalid shard info (shardCount must be greater than 0)");
-									await SendClose(4010);
+									await SendClose(4010, "Invalid shard info");
 									return;
 								}
 
 								if (shardId >= shardCount)
 								{
 									websocketLogger.LogWarning("Invalid shard info (shardId {0} must be less than shardCount {1})", shardId, shardCount);
-									await SendClose(4010);
+									await SendClose(4010, "Invalid shard info");
 									return;
 								}
 								else
@@ -268,14 +269,13 @@ namespace Smallscord.WebSockets
 			catch (JsonException e)
 			{
 				websocketLogger.LogTrace("Exception occured while deserializing JSON: {0}", e);
-				await SendClose(4002);
+				await SendClose(4002, $"JSON parsing error: {e.Message}");
 			}
 		}
 
 		private async Task SendIdentifyResponse()
 		{
-			// TODO:
-			//await SendDispatch(new EventReady(SessionId))
+			await SendDispatch(new EventReady(SessionId));
 		}
 
 		private async Task SendResumeResponse(GatewayResume resumeInfo, WebSocketController previousSession, bool resumeSuccess)

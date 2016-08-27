@@ -6,10 +6,14 @@ namespace Smallscord.Events
 {
 	public class EventReady : GatewayEvent
 	{
+		public const int GATEWAY_VERSION = 6;
+
 		public EventReady(string sessionId)
 			: base (EventType.Ready)
 		{
 			SessionId = sessionId;
+			User = UserInfo.Default;
+			GatewayVersion = GATEWAY_VERSION;
 		}
 		
 		[JsonProperty("v")]
